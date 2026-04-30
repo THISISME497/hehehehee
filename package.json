@@ -1,0 +1,12 @@
+{
+  "name": "hexanaut-server",
+  "version": "1.0.0",
+  "description": "Server for Hexanaut C++ Game",
+  "main": "server.js",
+  "dependencies": {
+    "ws": "^8.0.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}
