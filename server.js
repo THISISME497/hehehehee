@@ -1,28 +1,43 @@
 const WebSocket = require('ws');
-const wss = new WebSocket.Server({ port: process.env.PORT || 8080 });
+const port = process.env.PORT || 8080;
+const wss = new WebSocket.Server({ port });
 
 let players = {};
+const colors = [0x0000FF, 0xFF0000, 0x00FF00, 0xFFFF00, 0xFF00FF, 0x00FFFF]; // Синій, Червоний, Зелений...
 
 wss.on('connection', (ws) => {
     const id = Math.random().toString(36).substr(2, 9);
-    console.log(`Player connected: ${id}`);
+    // Призначаємо колір залежно від кількості гравців
+    const colorIdx = Object.keys(players).length % colors.length;
+    players[id] = { q: 0, r: 0, trail: [], color: colors[colorIdx], score: 0 };
 
     ws.on('message', (message) => {
         const data = JSON.parse(message);
-        // Оновлюємо позицію гравця
-        players[id] = { q: data.q, r: data.r, color: data.color };
+        if (players[id]) {
+            players[id].q = data.q;
+            players[id].r = data.r;
+            players[id].trail = data.trail || [];
+
+            // Перевірка на "Slice": чи врізався хтось у хвіст іншого
+            Object.keys(players).forEach(otherId => {
+                if (id !== otherId) {
+                    players[otherId].trail.forEach(t => {
+                        if (t.q === data.q && t.r === data.r) {
+                            // Якщо гравець А наступив на хвіст гравця Б
+                            ws.send(JSON.stringify({ type: 'killed_someone' }));
+                            // Можна надіслати сигнал смерті гравцю Б через його сокет
+                        }
+                    });
+                }
+            });
+        }
         
-        // Розсилаємо всім стан світу
-        const update = JSON.stringify({ type: 'update', players });
         wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) client.send(update);
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'update', players }));
+            }
         });
     });
 
-    ws.on('close', () => {
-        delete players[id];
-        console.log(`Player disconnected: ${id}`);
-    });
+    ws.on('close', () => { delete players[id]; });
 });
-
-console.log("Server is running...");
