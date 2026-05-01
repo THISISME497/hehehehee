@@ -1,26 +1,14 @@
-const dgram = require('dgram');
-const server = dgram.createSocket('udp4');
-const PORT = process.env.PORT || 8080;
+const http = require('http');
 
-let players = {};
+// Render sets the PORT environment variable. If not found, it defaults to 10000.
+const port = process.env.PORT || 10000;
 
-server.on('message', (msg, rinfo) => {
-    try {
-        const data = JSON.parse(msg.toString());
-        const id = `${rinfo.address}:${rinfo.port}`;
-        players[id] = { q: data.q, r: data.r, last: Date.now() };
-        
-        // Відправляємо список всіх гравців назад (UDP)
-        const output = JSON.stringify(players);
-        server.send(output, rinfo.port, rinfo.address);
-    } catch (e) {}
+const server = http.createServer((req, res) => {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/plain');
+  res.end('67');
 });
 
-server.on('listening', () => console.log(`UDP Server on ${PORT}`));
-server.bind(PORT);
-
-// Видаляємо тих, хто відключився
-setInterval(() => {
-    const now = Date.now();
-    for (let id in players) if (now - players[id].last > 3000) delete players[id];
-}, 3000);
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Server running at http://0.0.0:${port}/`);
+});
