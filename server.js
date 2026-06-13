@@ -3,7 +3,7 @@ const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http, { cors: { origin: "*" } });
 
-// 1. ВІДДАЧА HTML КОДУ (ЕКРАН ВХОДУ ТА СТИЛІ)
+// 1. ВІДДАЧА HTML КОДУ (БЕЗ КОНФЛІКТІВ ЗІ ЗМІННИМИ)
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -93,9 +93,12 @@ app.get('/', (req, res) => {
         function updateLeaderboard() {
             const list = document.getElementById('lb-list'); list.innerHTML = '';
             const sorted = Object.values(players).sort((a,b) => b.territory.length - a.territory.length).slice(0, 5);
-            sorted.forEach((p, idx) => {
-                list.innerHTML += `<div class="lb-player"><span>${idx+1}. ${p.username}</span><span style="color:${p.color}">${p.territory.length}</span></div>`;
-            });
+            
+            // Виправлений безпечний рендеринг рядків для Node.js сервера
+            for (let i = 0; i < sorted.length; i++) {
+                const p = sorted[i];
+                list.innerHTML += '<div class="lb-player"><span>' + (i+1) + '. ' + p.username + '</span><span style="color:' + p.color + '">' + p.territory.length + '</span></div>';
+            }
         }
 
         function draw() {
@@ -126,7 +129,7 @@ app.get('/', (req, res) => {
 });
 // 2. МУЛЬТИПЛЕЄРНА ЛОГІКА НА СЕРВЕРІ
 let players = {};
-const MAP_RADIUS = 150; // Величезна мапа для багатьох комп'ютерів
+const MAP_RADIUS = 150; // Величезна карта
 
 function getHexDirection(angle) {
     const dirs = [{q:1,r:0}, {q:1,r:-1}, {q:0,r:-1}, {q:-1,r:0}, {q:-1,r:1}, {q:0,r:1}];
