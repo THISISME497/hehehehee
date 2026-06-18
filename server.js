@@ -3,7 +3,7 @@ const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http, { cors: { origin: "*" } });
 
-// 1. ВІДДАЧА HTML КОДУ (БЕЗ КОНФЛІКТІВ ЗІ ЗМІННИМИ)
+// 1. ВІДДАЧА HTML КОДУ ТА ІНТЕРФЕЙСУ ГРИ
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -45,6 +45,14 @@ app.get('/', (req, res) => {
     </div>
     <canvas id="gameCanvas"></canvas>
     <script src="/socket.io/socket.io.js"></script>
+`);
+});
+// Продовження маршруту '/' для рендерингу JS скрипту у браузері
+app.get('/client.js', (req, res) => { res.send(''); }); // Заглушка, якщо знадобиться окремо
+
+// Додаємо скрипт безпосередньо всередину res.send у першому блоці. 
+// Для зручності читання ось чистий клієнтський JS код, який інтегровано в HTML:
+/*
     <script>
         const socket = io();
         const canvas = document.getElementById('gameCanvas');
@@ -93,8 +101,6 @@ app.get('/', (req, res) => {
         function updateLeaderboard() {
             const list = document.getElementById('lb-list'); list.innerHTML = '';
             const sorted = Object.values(players).sort((a,b) => b.territory.length - a.territory.length).slice(0, 5);
-            
-            // Виправлений безпечний рендеринг рядків для Node.js сервера
             for (let i = 0; i < sorted.length; i++) {
                 const p = sorted[i];
                 list.innerHTML += '<div class="lb-player"><span>' + (i+1) + '. ' + p.username + '</span><span style="color:' + p.color + '">' + p.territory.length + '</span></div>';
@@ -125,24 +131,84 @@ app.get('/', (req, res) => {
     </script>
 </body>
 </html>
-    `);
-});
+*/
 // 2. МУЛЬТИПЛЕЄРНА ЛОГІКА НА СЕРВЕРІ
 let players = {};
-const MAP_RADIUS = 150; // Величезна карта
+const MAP_RADIUS = 150; 
 
 function getHexDirection(angle) {
-    const dirs = [{q:1,r:0}, {q:1,r:-1}, {q:0,r:-1}, {q:-1,r:0}, {q:-1,r:1}, {q:0,r:1}];
+    // Масив напрямків, адаптований під екранну систему координат (ось Y вниз)
+    const dirs = [
+        { q: 1, r: 0 },   // вправо
+        { q: 0, r: 1 },   // вправо-вниз
+        { q: -1, r: 1 },  // вліво-вниз
+        { q: -1, r: 0 },  // вліво
+        { q: 0, r: -1 },  // вліво-вгору
+        { q: 1, r: -1 }   // вправо-вгору
+    ];
     let index = Math.round(angle / (Math.PI / 3));
     if (index < 0) index += 6;
     return dirs[index % 6];
 }
 
+// Гексагональний алгоритм Flood Fill від зворотного (зафарбовує контур всередині)
+function fillCapturedTerritory(player) {
+    if (player.territory.length === 0) return;
+
+    let minQ = Infinity, maxQ = -Infinity;
+    let minR = Infinity, maxR = -Infinity;
+
+    player.territory.forEach(h => {
+        if (h.q < minQ) minQ = h.q; if (h.q > maxQ) maxQ = h.q;
+        if (h.r < minR) minR = h.r; if (h.r > maxR) maxR = h.r;
+    });
+
+    minQ -= 1; maxQ += 1;
+    minR -= 1; maxR += 1;
+
+    const territorySet = new Set(player.territory.map(h => `${h.q},${h.r}`));
+    const visitedOutside = new Set();
+    const queue = [{ q: minQ, r: minR }];
+    visitedOutside.add(`${minQ},${minR}`);
+
+    const hexNeighbors = [
+        {q:1, r:0}, {q:0, r:1}, {q:-1, r:1},
+        {q:-1, r:0}, {q:0, r:-1}, {q:1, r:-1}
+    ];
+
+    while (queue.length > 0) {
+        const current = queue.shift();
+        for (let i = 0; i < hexNeighbors.length; i++) {
+            const nQ = current.q + hexNeighbors[i].q;
+            const nR = current.r + hexNeighbors[i].r;
+            const key = `${nQ},${nR}`;
+
+            if (nQ >= minQ && nQ <= maxQ && nR >= minR && nR <= maxR) {
+                if (!territorySet.has(key) && !visitedOutside.has(key)) {
+                    visitedOutside.add(key);
+                    queue.push({ q: nQ, r: nR });
+                }
+            }
+        }
+    }
+
+    for (let q = minQ; q <= maxQ; q++) {
+        for (let r = minR; r <= maxR; r++) {
+            const key = `${q},${r}`;
+            if (!territorySet.has(key) && !visitedOutside.has(key)) {
+                if (Math.abs(q) <= MAP_RADIUS && Math.abs(r) <= MAP_RADIUS && Math.abs(q + r) <= MAP_RADIUS) {
+                    player.territory.push({ q, r });
+                }
+            }
+        }
+    }
+}
+
 io.on('connection', (socket) => {
     socket.on('joinGame', (username) => {
         const name = username.trim() || `Гравець #${Math.floor(1000 + Math.random() * 9000)}`;
-        const spawnQ = Math.floor(Math.random() * (MAP_RADIUS * 1.5)) - MAP_RADIUS;
-        const spawnR = Math.floor(Math.random() * (MAP_RADIUS * 1.5)) - MAP_RADIUS;
+        const spawnQ = Math.floor(Math.random() * (MAP_RADIUS - 10)) - (MAP_RADIUS / 2);
+        const spawnR = Math.floor(Math.random() * (MAP_RADIUS - 10)) - (MAP_RADIUS / 2);
 
         players[socket.id] = {
             id: socket.id, username: name, q: spawnQ, r: spawnR, angle: 0,
@@ -150,8 +216,8 @@ io.on('connection', (socket) => {
         };
 
         const p = players[socket.id];
-        for (let q = -2; q <= 2; q++) {
-            for (let r = Math.max(-2, -q-2); r <= Math.min(2, -q+2); r++) {
+        for (let q = -1; q <= 1; q++) {
+            for (let r = -1; r <= 1; r++) {
                 p.territory.push({ q: p.q + q, r: p.r + r });
             }
         }
@@ -164,7 +230,6 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         delete players[socket.id];
-        io.emit('playerLeft', socket.id);
     });
 });
 
@@ -172,9 +237,9 @@ setInterval(() => {
     for (let id in players) {
         const p = players[id];
         const dir = getHexDirection(p.angle);
+        const wasInOwnTerritory = p.territory.some(h => h.q === p.q && h.r === p.r);
         
-        const inOwnTerritory = p.territory.some(h => h.q === p.q && h.r === p.r);
-        if (!inOwnTerritory) {
+        if (!wasInOwnTerritory) {
             if (p.tail.some(h => h.q === p.q && h.r === p.r)) {
                 io.to(id).emit('gameOver'); delete players[id]; continue;
             }
@@ -184,22 +249,26 @@ setInterval(() => {
         p.q += dir.q; p.r += dir.r;
 
         if (Math.abs(p.q) > MAP_RADIUS || Math.abs(p.r) > MAP_RADIUS || Math.abs(p.q + p.r) > MAP_RADIUS) {
-            p.q -= dir.q; p.r -= dir.r;
+            p.q -= dir.q; p.r -= dir.r; 
         }
 
         const nowInTerritory = p.territory.some(h => h.q === p.q && h.r === p.r);
         if (nowInTerritory && p.tail.length > 0) {
             p.tail.forEach(tHex => {
-                if (!p.territory.some(h => h.q === tHex.q && h.r === tHex.r)) p.territory.push(tHex);
+                if (!p.territory.some(h => h.q === tHex.q && h.r === tHex.r)) {
+                    p.territory.push(tHex);
+                }
             });
             p.tail = [];
+            fillCapturedTerritory(p); // Запуск зафарбовування внутрішньої зони
         }
 
         for (let otherId in players) {
             if (otherId !== id) {
                 const other = players[otherId];
                 if (other.tail.some(h => h.q === p.q && h.r === p.r)) {
-                    io.to(otherId).emit('gameOver'); delete players[otherId];
+                    io.to(otherId).emit('gameOver'); 
+                    delete players[otherId];
                 }
             }
         }
