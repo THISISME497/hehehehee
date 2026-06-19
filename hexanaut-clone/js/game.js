@@ -3,7 +3,7 @@ import {
   hexToPixel, pixelToHex, dirToAngle, DIRECTIONS,
 } from './hex.js';
 
-export const PLAYER_SPEED = 87;
+export const PLAYER_SPEED = 100;
 
 export const PLAYER_COLORS = [
   '#4ade80', '#60a5fa', '#f472b6', '#fbbf24',
